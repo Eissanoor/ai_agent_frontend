@@ -132,7 +132,9 @@ const ChatInterface = () => {
           {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
         </VoiceButton>
         <SendButton type="submit" disabled={!input.trim() || isLoading}>
-          <Send size={20} />
+          <SendIconWrapper>
+            <Send size={20} />
+          </SendIconWrapper>
         </SendButton>
       </InputForm>
     </Container>
@@ -140,6 +142,21 @@ const ChatInterface = () => {
 };
 
 // Styled Components
+const SendIconWrapper = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6e8efb, #a777e3);
+  border-radius: 50%;
+  padding: 8px;
+  color: white;
+  transition: all 0.2s ease-in-out;
+  
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 10px rgba(110, 142, 251, 0.5);
+  }
+`;
 const Container = styled.div`
   max-width: 900px;
   margin: 0 auto;
