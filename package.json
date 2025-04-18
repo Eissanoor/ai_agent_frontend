@@ -18,7 +18,8 @@
     "react-dom": "^19.0.0",
     "react-feather": "^2.0.10",
     "styled-components": "^6.1.17",
-    "tailwindcss": "^4.1.4"
+    "tailwindcss": "^4.1.4",
+    "wavesurfer.js": "^7.9.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",

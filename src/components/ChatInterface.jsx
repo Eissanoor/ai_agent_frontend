@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
-import { Send, MessageSquare, Mic, MicOff } from 'react-feather';
+import { Send, MessageSquare, Mic, MicOff, Type, Volume2, Play, Pause, Check } from 'react-feather';
+import WaveSurfer from 'wavesurfer.js';
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
@@ -16,8 +17,14 @@ const ChatInterface = () => {
     await sendMessage(input);
   };
 
-  const sendMessage = async (message) => {
-    const userMessage = { type: 'user', content: message };
+  const sendMessage = async (message, source = 'text', audioBlob = null) => {
+    const userMessage = { 
+      type: 'user', 
+      content: message, 
+      source,
+      audioBlob: source === 'voice' ? audioBlob : null,
+      audioDuration: 0
+    };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
@@ -59,7 +66,10 @@ const ChatInterface = () => {
       };
 
       mediaRecorderRef.current.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        // Create audio blob with proper MIME type for better compatibility
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Store a copy of the audio blob for replay functionality
+        const replayableAudioBlob = audioBlob.slice(0, audioBlob.size, audioBlob.type);
         const formData = new FormData();
         formData.append('audio', audioBlob);
 
@@ -71,7 +81,7 @@ const ChatInterface = () => {
 
           const result = await response.json();
           if (result.success) {
-            await sendMessage(result.message);
+            await sendMessage(result.message, 'voice', replayableAudioBlob);
           } else {
             const errorMessage = { type: 'error', content: result.message };
             setMessages(prev => [...prev, errorMessage]);
@@ -103,7 +113,19 @@ const ChatInterface = () => {
       <MessagesContainer>
         {messages.map((message, index) => (
           <Message key={index} $type={message.type}>
-            {message.content}
+            {message.type === 'user' && (
+              <MessageSourceIcon>
+                {message.source === 'voice' ? <Volume2 size={16} /> : <Type size={16} />}
+              </MessageSourceIcon>
+            )}
+            {message.source === 'voice' && message.type === 'user' ? (
+              <VoiceMessageContent>
+                <VoiceMessagePlayer messageId={index} audioBlob={message.audioBlob} />
+                <p>{message.content}</p>
+              </VoiceMessageContent>
+            ) : (
+              message.content
+            )}
           </Message>
         ))}
         {isLoading && (
@@ -191,11 +213,210 @@ const MessagesContainer = styled.div`
   gap: 1rem;
 `;
 
+// Voice Message Player Component
+const VoiceMessagePlayer = ({ messageId, audioBlob }) => {
+  const waveformRef = useRef(null);
+  const wavesurferRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState('0:00');
+  const [currentTime, setCurrentTime] = useState('0:00');
+  const [audioUrl, setAudioUrl] = useState(null);
+  
+  // Create audio URL when component mounts or audioBlob changes
+  useEffect(() => {
+    if (audioBlob) {
+      const url = URL.createObjectURL(audioBlob);
+      setAudioUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+  }, [audioBlob]);
+
+  useEffect(() => {
+    if (!waveformRef.current || !audioUrl) return;
+    
+    // Clean up previous wavesurfer instance if it exists
+    if (wavesurferRef.current) {
+      wavesurferRef.current.destroy();
+    }
+
+    // Initialize WaveSurfer
+    const wavesurfer = WaveSurfer.create({
+      container: waveformRef.current,
+      waveColor: '#a8d5ba',
+      progressColor: '#4CAF50',
+      cursorColor: 'transparent',
+      barWidth: 2,
+      barGap: 3,
+      barRadius: 3,
+      height: 50,
+      responsive: true,
+      normalize: true,
+      partialRender: true,
+    });
+
+    wavesurfer.load(audioUrl);
+    wavesurferRef.current = wavesurfer;
+
+    wavesurfer.on('ready', () => {
+      const audioDuration = wavesurfer.getDuration();
+      setDuration(formatTime(audioDuration));
+    });
+
+    wavesurfer.on('audioprocess', () => {
+      setCurrentTime(formatTime(wavesurfer.getCurrentTime()));
+    });
+
+    wavesurfer.on('finish', () => {
+      setIsPlaying(false);
+    });
+
+    return () => {
+      wavesurfer.destroy();
+    };
+  }, [audioUrl]);
+
+  const formatTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const togglePlayPause = () => {
+    if (wavesurferRef.current) {
+      wavesurferRef.current.playPause();
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  return (
+    <VoicePlayerContainer>
+      <PlayButtonWrapper $isPlaying={isPlaying} onClick={togglePlayPause}>
+        <PlayButtonIcon $isPlaying={isPlaying}>
+          {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+        </PlayButtonIcon>
+      </PlayButtonWrapper>
+      <WaveformContainer>
+        <WaveformWrapper ref={waveformRef} />
+        <TimeDisplay>
+          <CurrentTime>{currentTime}</CurrentTime>
+          <TotalTime>{duration}</TotalTime>
+        </TimeDisplay>
+      </WaveformContainer>
+    </VoicePlayerContainer>
+  );
+};
+
+const MessageSourceIcon = styled.div`
+  position: absolute;
+  top: -10px;
+  ${props => props.children.type.name === 'Volume2' ? 'right: -10px;' : 'right: -10px;'}
+  background: ${props => props.children.type.name === 'Volume2' ? '#ff4b5c' : '#007bff'};
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+`;
+
+const VoiceMessageContent = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  
+  p {
+    margin: 5px 0 0 0;
+    font-style: italic;
+    color: #666;
+    font-size: 0.9em;
+  }
+`;
+
+const VoicePlayerContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background-color: #006c4a;
+  border-radius: 12px;
+  padding: 10px;
+  min-width: 250px;
+`;
+
+const PlayButtonWrapper = styled.button`
+  background: ${props => props.$isPlaying ? 'linear-gradient(145deg, #ff4b5c, #dc3545)' : 'linear-gradient(145deg, #4CAF50, #2E7D32)'};
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25);
+  }
+  
+  &:active {
+    transform: scale(0.95);
+  }
+`;
+
+const PlayButtonIcon = styled.div`
+  background-color: white;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: ${props => props.$isPlaying ? '#dc3545' : '#2E7D32'};
+  transition: all 0.3s ease;
+  
+  svg {
+    margin-left: ${props => props.$isPlaying ? '0' : '2px'};
+  }
+`;
+
+const WaveformContainer = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+`;
+
+const WaveformWrapper = styled.div`
+  width: 100%;
+  height: 50px;
+`;
+
+const TimeDisplay = styled.div`
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 4px;
+  color: white;
+  font-size: 0.75rem;
+`;
+
+const CurrentTime = styled.span``;
+
+const TotalTime = styled.span``;
+
 const Message = styled.div`
   padding: 0.8rem 1.2rem;
   border-radius: 1rem;
   max-width: 80%;
   animation: fadeIn 0.3s ease;
+  position: relative;
 
   ${({ $type }) => {
     switch ($type) {
