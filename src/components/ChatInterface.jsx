@@ -78,7 +78,7 @@ const ChatInterface = () => {
             method: 'POST',
             body: formData
           });
-
+          console.log(response);
           const result = await response.json();
           if (result.success) {
             await sendMessage(result.message, 'voice', replayableAudioBlob);
