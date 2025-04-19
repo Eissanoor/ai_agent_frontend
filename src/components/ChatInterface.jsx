@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
 import { Send, MessageSquare, Mic, MicOff, Type, Volume2, Play, Pause, Check } from 'react-feather';
 import WaveSurfer from 'wavesurfer.js';
-
+import config from '../config';
+console.log(config.API_BASE_URL)
 const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -30,7 +31,7 @@ const ChatInterface = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/text/process', {
+      const response = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.TEXT_PROCESS}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -39,7 +40,48 @@ const ChatInterface = () => {
       });
 
       const data = await response.json();
-      const aiMessage = { type: 'ai', content: data.message };
+      console.log('API Response:', data);
+      
+      // Extract the message from the nested response structure
+      let messageContent = '';
+      let originalText = '';
+      
+      // Handle transcription data if available (for consistency with voice processing)
+      if (data.transcription) {
+        originalText = data.transcription.originalText || data.transcription.transcription || '';
+      }
+      
+      if (data.success && data.result && data.result.result && data.result.result.message) {
+        messageContent = data.result.result.message;
+        
+        // Make it more conversational based on intent
+        if (data.result.intent) {
+          const intent = data.result.intent;
+          
+          if (intent === 'login' && data.result.result.user) {
+            const userEmail = data.result.result.user.email;
+            messageContent = `👋 Welcome back! You've successfully logged in as ${userEmail}. How can I assist you today?`;
+          } else if (intent === 'navigate') {
+            const route = data.result.result.route || '';
+            messageContent = `🔄 I'm navigating you to ${route}. Is there anything specific you'd like to see there?`;
+          }
+        }
+      } else if (data.message) {
+        // Fallback to direct message property if available
+        messageContent = data.message;
+      } else {
+        // Default message if structure is unexpected
+        messageContent = 'I received your message. How can I help you further?';
+      }
+      
+      // Add the original transcription if available and different from the response message
+      if (originalText && !messageContent.includes(originalText)) {
+        messageContent = `I understood: "${originalText}"
+
+${messageContent}`;
+      }
+      
+      const aiMessage = { type: 'ai', content: messageContent };
       setMessages(prev => [...prev, aiMessage]);
     } catch (error) {
       const errorMessage = { type: 'error', content: 'Error: ' + error.message };
@@ -74,16 +116,58 @@ const ChatInterface = () => {
         formData.append('audio', audioBlob);
 
         try {
-          const response = await fetch('http://localhost:8000/api/voice/process', {
+          const response = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.VOICE_PROCESS}`, {
             method: 'POST',
             body: formData
           });
-          console.log(response);
+          console.log('Voice API Response:', response);
           const result = await response.json();
+          console.log('Voice API Result:', result);
+          
           if (result.success) {
-            await sendMessage(result.message, 'voice', replayableAudioBlob);
+            // Extract message from potentially nested structure
+            let messageContent = '';
+            let originalText = '';
+            
+            // Handle transcription data if available
+            if (result.transcription) {
+              originalText = result.transcription.originalText || result.transcription.transcription || '';
+            }
+            
+            // Handle result data
+            if (result.result && result.result.result && result.result.result.message) {
+              messageContent = result.result.result.message;
+              
+              // Make it more conversational based on intent
+              if (result.result.intent) {
+                const intent = result.result.intent;
+                
+                if (intent === 'login' && result.result.result.user) {
+                  const userEmail = result.result.result.user.email;
+                  messageContent = `👋 Welcome back! I've recognized your voice and logged you in as ${userEmail}. How can I help you today?`;
+                } else if (intent === 'navigate') {
+                  const route = result.result.result.route || '';
+                  messageContent = `🔄 I'm navigating you to ${route}. Is there anything specific you'd like to see there?`;
+                }
+              }
+            } else if (result.message) {
+              // Direct message property
+              messageContent = result.message;
+            } else {
+              // Default fallback message
+              messageContent = 'I understood your voice message. How can I assist you further?';
+            }
+            
+            // Add the original transcription if available and different from the response message
+            if (originalText && !messageContent.includes(originalText)) {
+              messageContent = `I heard: "${originalText}"
+
+${messageContent}`;
+            }
+            
+            await sendMessage(messageContent, 'voice', replayableAudioBlob);
           } else {
-            const errorMessage = { type: 'error', content: result.message };
+            const errorMessage = { type: 'error', content: result.message || 'Sorry, I couldn\'t process your voice message.' };
             setMessages(prev => [...prev, errorMessage]);
           }
         } catch (error) {
