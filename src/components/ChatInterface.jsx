@@ -18,7 +18,7 @@ const ChatInterface = () => {
     await sendMessage(input);
   };
 
-  const sendMessage = async (message, source = 'text', audioBlob = null) => {
+  const sendMessage = async (message, source = 'text', audioBlob = null, suggestions = []) => {
     const userMessage = { 
       type: 'user', 
       content: message, 
@@ -45,14 +45,23 @@ const ChatInterface = () => {
       // Extract the message from the nested response structure
       let messageContent = '';
       let originalText = '';
+      let suggestions = [];
       
       // Handle transcription data if available (for consistency with voice processing)
       if (data.transcription) {
         originalText = data.transcription.originalText || data.transcription.transcription || '';
       }
       
-      if (data.success && data.result && data.result.result && data.result.result.message) {
-        messageContent = data.result.result.message;
+      if (data.success && data.result && data.result.result) {
+        // Extract message content
+        if (data.result.result.message) {
+          messageContent = data.result.result.message;
+        }
+        
+        // Extract suggestions if available
+        if (data.result.result.suggestions && Array.isArray(data.result.result.suggestions)) {
+          suggestions = data.result.result.suggestions;
+        }
         
         // Make it more conversational based on intent
         if (data.result.intent) {
@@ -64,6 +73,8 @@ const ChatInterface = () => {
           } else if (intent === 'navigate') {
             const route = data.result.result.route || '';
             messageContent = `🔄 I'm navigating you to ${route}. Is there anything specific you'd like to see there?`;
+          } else if (intent === 'suggestions' && suggestions.length > 0) {
+            messageContent = `💡 ${messageContent || 'Here are some suggestions that might help you:'}`;
           }
         }
       } else if (data.message) {
@@ -81,7 +92,11 @@ const ChatInterface = () => {
 ${messageContent}`;
       }
       
-      const aiMessage = { type: 'ai', content: messageContent };
+      const aiMessage = { 
+        type: 'ai', 
+        content: messageContent,
+        suggestions: suggestions.length > 0 ? suggestions : undefined
+      };
       setMessages(prev => [...prev, aiMessage]);
     } catch (error) {
       const errorMessage = { type: 'error', content: 'Error: ' + error.message };
@@ -128,6 +143,7 @@ ${messageContent}`;
             // Extract message from potentially nested structure
             let messageContent = '';
             let originalText = '';
+            let suggestions = [];
             
             // Handle transcription data if available
             if (result.transcription) {
@@ -135,8 +151,16 @@ ${messageContent}`;
             }
             
             // Handle result data
-            if (result.result && result.result.result && result.result.result.message) {
-              messageContent = result.result.result.message;
+            if (result.result && result.result.result) {
+              // Extract message content
+              if (result.result.result.message) {
+                messageContent = result.result.result.message;
+              }
+              
+              // Extract suggestions if available
+              if (result.result.result.suggestions && Array.isArray(result.result.result.suggestions)) {
+                suggestions = result.result.result.suggestions;
+              }
               
               // Make it more conversational based on intent
               if (result.result.intent) {
@@ -148,6 +172,8 @@ ${messageContent}`;
                 } else if (intent === 'navigate') {
                   const route = result.result.result.route || '';
                   messageContent = `🔄 I'm navigating you to ${route}. Is there anything specific you'd like to see there?`;
+                } else if (intent === 'suggestions' && suggestions.length > 0) {
+                  messageContent = `💡 ${messageContent || 'Here are some suggestions that might help you:'}`;
                 }
               }
             } else if (result.message) {
@@ -165,7 +191,15 @@ ${messageContent}`;
 ${messageContent}`;
             }
             
-            await sendMessage(messageContent, 'voice', replayableAudioBlob);
+            // Create a message object with suggestions if available
+            const messageObj = {
+              content: messageContent,
+              source: 'voice',
+              audioBlob: replayableAudioBlob,
+              suggestions: suggestions.length > 0 ? suggestions : undefined
+            };
+            
+            await sendMessage(messageObj.content, messageObj.source, messageObj.audioBlob, messageObj.suggestions);
           } else {
             const errorMessage = { type: 'error', content: result.message || 'Sorry, I couldn\'t process your voice message.' };
             setMessages(prev => [...prev, errorMessage]);
@@ -196,21 +230,38 @@ ${messageContent}`;
 
       <MessagesContainer>
         {messages.map((message, index) => (
-          <Message key={index} $type={message.type}>
-            {message.type === 'user' && (
-              <MessageSourceIcon>
-                {message.source === 'voice' ? <Volume2 size={16} /> : <Type size={16} />}
-              </MessageSourceIcon>
+          <React.Fragment key={index}>
+            <Message $type={message.type}>
+              {message.type === 'user' && (
+                <MessageSourceIcon>
+                  {message.source === 'voice' ? <Volume2 size={16} /> : <Type size={16} />}
+                </MessageSourceIcon>
+              )}
+              {message.source === 'voice' && message.type === 'user' ? (
+                <VoiceMessageContent>
+                  <VoiceMessagePlayer messageId={index} audioBlob={message.audioBlob} />
+                  <p>{message.content}</p>
+                </VoiceMessageContent>
+              ) : (
+                message.content
+              )}
+            </Message>
+            {message.type === 'ai' && message.suggestions && message.suggestions.length > 0 && (
+              <SuggestionsContainer>
+                {message.suggestions.map((suggestion, suggIndex) => (
+                  <SuggestionButton 
+                    key={suggIndex}
+                    onClick={() => {
+                      setInput(suggestion);
+                      handleSubmit({ preventDefault: () => {} });
+                    }}
+                  >
+                    {suggestion}
+                  </SuggestionButton>
+                ))}
+              </SuggestionsContainer>
             )}
-            {message.source === 'voice' && message.type === 'user' ? (
-              <VoiceMessageContent>
-                <VoiceMessagePlayer messageId={index} audioBlob={message.audioBlob} />
-                <p>{message.content}</p>
-              </VoiceMessageContent>
-            ) : (
-              message.content
-            )}
-          </Message>
+          </React.Fragment>
         ))}
         {isLoading && (
           <Message $type="ai">
@@ -577,6 +628,38 @@ const SendButton = styled.button`
   &:disabled {
     background: #6c757d;
     cursor: not-allowed;
+  }
+`;
+
+// Suggestions styled components
+const SuggestionsContainer = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 16px 40px;
+  max-width: 90%;
+`;
+
+const SuggestionButton = styled.button`
+  background: linear-gradient(135deg, #f0f4ff, #e6f0ff);
+  border: 1px solid #d1e0ff;
+  border-radius: 18px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  color: #4a6fa5;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  
+  &:hover {
+    background: linear-gradient(135deg, #e6f0ff, #d1e0ff);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  &:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
   }
 `;
 
