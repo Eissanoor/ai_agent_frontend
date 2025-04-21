@@ -2,7 +2,7 @@
 
 const config = {
   // Base API URL
-  API_BASE_URL: 'http://localhost:8000',
+  API_BASE_URL: '',
   
   // API endpoints
   ENDPOINTS: {
